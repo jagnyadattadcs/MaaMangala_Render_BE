@@ -2,10 +2,13 @@ const express = require('express');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const fetch = require('node-fetch'); // ✅ For node-fetch v2
+
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 5000;
+const SELF_URL = "https://maamangalabackend.onrender.com";
 
 // Middleware
 app.use(cors());
@@ -196,6 +199,20 @@ app.post('/api/contact', async (req, res) => {
     res.status(500).json({ error: 'Failed to process contact message' });
   }
 });
+
+app.get("/", (req, res) =>{
+  res.send("API is running....");
+});
+
+// Ping every 14 minutes to keep Render awake
+setInterval(async () => {
+  try {
+    const res = await fetch(SELF_URL);
+    console.log(`Self-ping status: ${res.status} at ${new Date().toISOString()}`);
+  } catch (err) {
+    console.error("Self-ping failed:", err.message);
+  }
+}, 1 * 60 * 1000);
 
 // Start server
 app.listen(port, () => {

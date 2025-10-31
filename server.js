@@ -7,6 +7,15 @@ require('dotenv').config();
 
 const Booking = require('./models/Booking');
 
+// Nodemailer configuration
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -158,15 +167,6 @@ app.use('/api/services', serviceRoutes);
 app.use('/api/gallery', galleryRoutes);
 
 let messages = [];
-
-// Nodemailer configuration
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER, // Your Gmail address
-    pass: process.env.EMAIL_PASS, // Your Gmail App Password
-  },
-});
 
 app.get('/api/bookings', async (req, res) => {
   try {

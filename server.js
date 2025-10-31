@@ -5,18 +5,13 @@ const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
+const Booking = require('./models/Booking');
+
 const app = express();
 const port = process.env.PORT || 5000;
 
-const fetch = require('node-fetch'); 
-
-const SELF_URL = "https://maamangalabackend.onrender.com";
-
-
 // Middleware
-app.use(cors({
-  origin: '*',
-}));
+app.use(cors());
 app.use(bodyParser.json());
 
 // MongoDB connection
@@ -162,8 +157,6 @@ const galleryRoutes = require('./routes/gallery');
 app.use('/api/services', serviceRoutes);
 app.use('/api/gallery', galleryRoutes);
 
-// In-memory storage for bookings (replace with a database in production)
-let bookings = [];
 let messages = [];
 
 // Nodemailer configuration
@@ -175,98 +168,130 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+app.get('/api/bookings', async (req, res) => {
+  try {
+    const { status } = req.query;
+    const filter = {};
+
+    if (status && ['pending', 'accepted', 'cancelled'].includes(status)) {
+      filter.status = status;
+    }
+
+    const bookingList = await Booking.find(filter).sort({ createdAt: -1 });
+    res.json(bookingList);
+  } catch (error) {
+    console.error('Error fetching bookings:', error);
+    res.status(500).json({ error: 'Failed to fetch bookings' });
+  }
+});
+
 // Booking submission endpoint
 app.post('/api/bookings', async (req, res) => {
   try {
     const bookingData = req.body;
 
-    // Basic validation
     if (!bookingData.brand || !bookingData.model || !bookingData.name || !bookingData.phone) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Store booking
-    const booking = {
-      id: bookings.length + 1,
-      ...bookingData,
-      createdAt: new Date().toISOString(),
-    };
-    bookings.push(booking);
+    const normalizedServices = Array.isArray(bookingData.services) ? bookingData.services : [];
+    const normalizedServiceType = bookingData.serviceType === 'pickup' ? 'pickup' : 'workshop';
 
-    // Prepare email content
+    const booking = await Booking.create({
+      brand: bookingData.brand,
+      model: bookingData.model,
+      year: bookingData.year,
+      registrationNumber: bookingData.registrationNumber,
+      fuel: bookingData.fuel,
+      services: normalizedServices,
+      description: bookingData.description,
+      date: bookingData.date,
+      time: bookingData.time,
+      serviceType: normalizedServiceType,
+      name: bookingData.name,
+      phone: bookingData.phone,
+      address: bookingData.address,
+      city: bookingData.city,
+      pincode: bookingData.pincode,
+      email: bookingData.email
+    });
+
+    const servicesDisplay = normalizedServices.length > 0 ? normalizedServices.join(', ') : 'Not specified';
+    const serviceTypeLabel = normalizedServiceType === 'pickup' ? 'Pickup & Drop' : 'Workshop Visit';
+    const addressDisplay = [booking.address, booking.city, booking.pincode].filter(Boolean).join(', ');
+
     const customerMailOptions = {
       from: process.env.EMAIL_USER,
-      to: bookingData.email || '', // Fallback email if not provided
+      to: booking.email || '',
       subject: 'Booking Confirmation - Car Service',
       html: `
         <h2>Booking Confirmation</h2>
-        <p>Dear ${bookingData.name},</p>
+        <p>Dear ${booking.name},</p>
         <p>Thank you for booking a car service with us. Below are your booking details:</p>
         <h3>Car Details</h3>
         <ul>
-          <li><strong>Brand:</strong> ${bookingData.brand}</li>
-          <li><strong>Model:</strong> ${bookingData.model}</li>
-          <li><strong>Year:</strong> ${bookingData.year}</li>
-          <li><strong>Registration:</strong> ${bookingData.registrationNumber}</li>
-          <li><strong>Fuel Type:</strong> ${bookingData.fuel}</li>
+          <li><strong>Brand:</strong> ${booking.brand}</li>
+          <li><strong>Model:</strong> ${booking.model}</li>
+          <li><strong>Year:</strong> ${booking.year || 'Not specified'}</li>
+          <li><strong>Registration:</strong> ${booking.registrationNumber || 'Not specified'}</li>
+          <li><strong>Fuel Type:</strong> ${booking.fuel || 'Not specified'}</li>
         </ul>
         <h3>Services</h3>
-        <p>${bookingData.services.join(', ')}</p>
-        ${bookingData.description ? `<h3>Issue Description</h3><p>${bookingData.description}</p>` : ''}
+        <p>${servicesDisplay}</p>
+        ${booking.description ? `<h3>Issue Description</h3><p>${booking.description}</p>` : ''}
         <h3>Appointment Details</h3>
         <ul>
-          <li><strong>Date:</strong> ${bookingData.date}</li>
-          <li><strong>Time:</strong> ${bookingData.time}</li>
-          <li><strong>Service Type:</strong> ${bookingData.serviceType === 'pickup' ? 'Pickup & Drop' : 'Workshop Visit'}</li>
+          <li><strong>Date:</strong> ${booking.date || 'Not specified'}</li>
+          <li><strong>Time:</strong> ${booking.time || 'Not specified'}</li>
+          <li><strong>Service Type:</strong> ${serviceTypeLabel}</li>
         </ul>
         <h3>Contact Information</h3>
         <ul>
-          <li><strong>Name:</strong> ${bookingData.name}</li>
-          <li><strong>Phone:</strong> ${bookingData.phone}</li>
-          <li><strong>Address:</strong> ${bookingData.address}, ${bookingData.city}, ${bookingData.pincode}</li>
-          ${bookingData.email ? `<li><strong>Email:</strong> ${bookingData.email}</li>` : ''}
+          <li><strong>Name:</strong> ${booking.name}</li>
+          <li><strong>Phone:</strong> ${booking.phone}</li>
+          ${addressDisplay ? `<li><strong>Address:</strong> ${addressDisplay}</li>` : ''}
+          ${booking.email ? `<li><strong>Email:</strong> ${booking.email}</li>` : ''}
         </ul>
         <p>We will contact you within 2 hours to confirm your appointment.</p>
         <p>Thank you,<br>Car Service Team</p>
-      `,
+      `
     };
 
     const adminMailOptions = {
       from: process.env.EMAIL_USER,
-      to: 'maamangalaautoworks5@gmail.com', // Replace with service center's email
+      to: 'maamangalaautoworks5@gmail.com',
       subject: 'New Booking Received',
       html: `
         <h2>New Booking Notification</h2>
         <p>A new booking has been received with the following details:</p>
         <h3>Car Details</h3>
         <ul>
-          <li><strong>Brand:</strong> ${bookingData.brand}</li>
-          <li><strong>Model:</strong> ${bookingData.model}</li>
-          <li><strong>Year:</strong> ${bookingData.year}</li>
-          <li><strong>Registration:</strong> ${bookingData.registrationNumber}</li>
-          <li><strong>Fuel Type:</strong> ${bookingData.fuel}</li>
+          <li><strong>Brand:</strong> ${booking.brand}</li>
+          <li><strong>Model:</strong> ${booking.model}</li>
+          <li><strong>Year:</strong> ${booking.year || 'Not specified'}</li>
+          <li><strong>Registration:</strong> ${booking.registrationNumber || 'Not specified'}</li>
+          <li><strong>Fuel Type:</strong> ${booking.fuel || 'Not specified'}</li>
         </ul>
         <h3>Services</h3>
-        <p>${bookingData.services.join(', ')}</p>
-        ${bookingData.description ? `<h3>Issue Description</h3><p>${bookingData.description}</p>` : ''}
+        <p>${servicesDisplay}</p>
+        ${booking.description ? `<h3>Issue Description</h3><p>${booking.description}</p>` : ''}
         <h3>Appointment Details</h3>
         <ul>
-          <li><strong>Date:</strong> ${bookingData.date}</li>
-          <li><strong>Time:</strong> ${bookingData.time}</li>
-          <li><strong>Service Type:</strong> ${bookingData.serviceType === 'pickup' ? 'Pickup & Drop' : 'Workshop Visit'}</li>
+          <li><strong>Date:</strong> ${booking.date || 'Not specified'}</li>
+          <li><strong>Time:</strong> ${booking.time || 'Not specified'}</li>
+          <li><strong>Service Type:</strong> ${serviceTypeLabel}</li>
         </ul>
         <h3>Customer Information</h3>
         <ul>
-          <li><strong>Name:</strong> ${bookingData.name}</li>
-          <li><strong>Phone:</strong> ${bookingData.phone}</li>
-          <li><strong>Address:</strong> ${bookingData.address}, ${bookingData.city}, ${bookingData.pincode}</li>
-          ${bookingData.email ? `<li><strong>Email:</strong> ${bookingData.email}</li>` : ''}
+          <li><strong>Name:</strong> ${booking.name}</li>
+          <li><strong>Phone:</strong> ${booking.phone}</li>
+          ${addressDisplay ? `<li><strong>Address:</strong> ${addressDisplay}</li>` : ''}
+          ${booking.email ? `<li><strong>Email:</strong> ${booking.email}</li>` : ''}
         </ul>
         <p>Please process this booking and contact the customer.</p>
-      `,
+      `
     };
 
-    // Send emails
     await transporter.sendMail(customerMailOptions);
     await transporter.sendMail(adminMailOptions);
 
@@ -274,6 +299,123 @@ app.post('/api/bookings', async (req, res) => {
   } catch (error) {
     console.error('Error processing booking:', error);
     res.status(500).json({ error: 'Failed to process booking' });
+  }
+});
+
+app.patch('/api/bookings/:id/accept', async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    if (booking.status === 'accepted') {
+      return res.status(200).json({ message: 'Booking already accepted', booking });
+    }
+
+    booking.status = 'accepted';
+    await booking.save();
+
+    if (booking.email) {
+      const servicesDisplay = booking.services && booking.services.length > 0 ? booking.services.join(', ') : 'Not specified';
+      const serviceTypeLabel = booking.serviceType === 'pickup' ? 'Pickup & Drop' : 'Workshop Visit';
+      const addressDisplay = [booking.address, booking.city, booking.pincode].filter(Boolean).join(', ');
+
+      await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: booking.email,
+        subject: 'Booking Accepted - Car Service',
+        html: `
+          <h2>Booking Accepted</h2>
+          <p>Dear ${booking.name},</p>
+          <p>Your booking has been accepted.</p>
+          <h3>Booking Details</h3>
+          <ul>
+            <li><strong>Brand:</strong> ${booking.brand}</li>
+            <li><strong>Model:</strong> ${booking.model}</li>
+            <li><strong>Date:</strong> ${booking.date || 'Not specified'}</li>
+            <li><strong>Time:</strong> ${booking.time || 'Not specified'}</li>
+            <li><strong>Service Type:</strong> ${serviceTypeLabel}</li>
+            <li><strong>Services:</strong> ${servicesDisplay}</li>
+          </ul>
+          ${addressDisplay ? `<p><strong>Address:</strong> ${addressDisplay}</p>` : ''}
+          <p>Thank you,<br>Car Service Team</p>
+        `
+      });
+    }
+
+    res.status(200).json({ message: 'Booking accepted successfully', booking });
+  } catch (error) {
+    console.error('Error accepting booking:', error);
+    res.status(500).json({ error: 'Failed to accept booking' });
+  }
+});
+
+app.patch('/api/bookings/:id/cancel', async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    if (booking.status === 'cancelled') {
+      return res.status(200).json({ message: 'Booking already cancelled', booking });
+    }
+
+    booking.status = 'cancelled';
+    await booking.save();
+
+    if (booking.email) {
+      const servicesDisplay = booking.services && booking.services.length > 0 ? booking.services.join(', ') : 'Not specified';
+      const serviceTypeLabel = booking.serviceType === 'pickup' ? 'Pickup & Drop' : 'Workshop Visit';
+      const addressDisplay = [booking.address, booking.city, booking.pincode].filter(Boolean).join(', ');
+
+      await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: booking.email,
+        subject: 'Booking Cancellation - Car Service',
+        html: `
+          <h2>Booking Update</h2>
+          <p>Dear ${booking.name},</p>
+          <p>There are no available slots, so it has been cancelled.</p>
+          <h3>Booking Details</h3>
+          <ul>
+            <li><strong>Brand:</strong> ${booking.brand}</li>
+            <li><strong>Model:</strong> ${booking.model}</li>
+            <li><strong>Date:</strong> ${booking.date || 'Not specified'}</li>
+            <li><strong>Time:</strong> ${booking.time || 'Not specified'}</li>
+            <li><strong>Service Type:</strong> ${serviceTypeLabel}</li>
+            <li><strong>Services:</strong> ${servicesDisplay}</li>
+          </ul>
+          ${addressDisplay ? `<p><strong>Address:</strong> ${addressDisplay}</p>` : ''}
+          <p>Thank you,<br>Car Service Team</p>
+        `
+      });
+    }
+
+    res.status(200).json({ message: 'Booking cancelled successfully', booking });
+  } catch (error) {
+    console.error('Error cancelling booking:', error);
+    res.status(500).json({ error: 'Failed to cancel booking' });
+  }
+});
+
+app.delete('/api/bookings/:id', async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    await booking.deleteOne();
+
+    res.json({ message: 'Booking deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting booking:', error);
+    res.status(500).json({ error: 'Failed to delete booking' });
   }
 });
 
@@ -347,17 +489,6 @@ app.post('/api/contact', async (req, res) => {
     res.status(500).json({ error: 'Failed to process contact message' });
   }
 });
-
-// Ping every 14 minutes to keep Render awake
-setInterval(async () => {
-  try {
-    const res = await fetch(SELF_URL);
-    console.log(`Self-ping status: ${res.status} at ${new Date().toISOString()}`);
-  } catch (err) {
-    console.error("Self-ping failed:", err.message);
-  }
-}, 14 * 60 * 1000);
-
 
 // Start server
 app.listen(port, () => {

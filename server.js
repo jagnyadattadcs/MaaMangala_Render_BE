@@ -9,12 +9,10 @@ const Booking = require('./models/Booking');
 
 // Nodemailer configuration
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 2525,
-  secure: false,
+  service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    pass: process.env.EMAIL_PASS, // Gmail App Password
   },
 });
 

@@ -1,5 +1,5 @@
 const express = require('express');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
@@ -7,25 +7,23 @@ require('dotenv').config();
 
 const Booking = require('./models/Booking');
 
-// Nodemailer configuration
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-  connectionTimeout: 10000,
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
+const EMAIL_SENDER = process.env.EMAIL_FROM || 'maamangalaautoworks5@gmail.com';
+const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_EMAIL || process.env.EMAIL_USER || 'maamangalaautoworks5@gmail.com';
+const CONTACT_NOTIFICATION_EMAIL = process.env.CONTACT_EMAIL || 'maamangalaautoworks5@gmail.com';
 
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('Email server connection failed:', error);
-  } else {
-    console.log('Email server is ready to send messages');
+const sendEmail = async ({ to, subject, html }) => {
+  if (!to) {
+    return;
   }
-});
+
+  await resend.emails.send({
+    from: EMAIL_SENDER,
+    to,
+    subject,
+    html,
+  });
+};
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -231,11 +229,11 @@ app.post('/api/bookings', async (req, res) => {
     const serviceTypeLabel = normalizedServiceType === 'pickup' ? 'Pickup & Drop' : 'Workshop Visit';
     const addressDisplay = [booking.address, booking.city, booking.pincode].filter(Boolean).join(', ');
 
-    const customerMailOptions = {
-      from: process.env.EMAIL_USER,
-      to: booking.email || '',
-      subject: 'Booking Confirmation - Car Service',
-      html: `
+    if (booking.email) {
+      await sendEmail({
+        to: booking.email,
+        subject: 'Booking Confirmation - Car Service',
+        html: `
         <h2>Booking Confirmation</h2>
         <p>Dear ${booking.name},</p>
         <p>Thank you for booking a car service with us. Below are your booking details:</p>
@@ -265,12 +263,12 @@ app.post('/api/bookings', async (req, res) => {
         </ul>
         <p>We will contact you within 2 hours to confirm your appointment.</p>
         <p>Thank you,<br>Car Service Team</p>
-      `
-    };
+      `,
+      });
+    }
 
-    const adminMailOptions = {
-      from: process.env.EMAIL_USER,
-      to: 'maamangalaautoworks5@gmail.com',
+    await sendEmail({
+      to: ADMIN_NOTIFICATION_EMAIL,
       subject: 'New Booking Received',
       html: `
         <h2>New Booking Notification</h2>
@@ -300,11 +298,8 @@ app.post('/api/bookings', async (req, res) => {
           ${booking.email ? `<li><strong>Email:</strong> ${booking.email}</li>` : ''}
         </ul>
         <p>Please process this booking and contact the customer.</p>
-      `
-    };
-
-    await transporter.sendMail(customerMailOptions);
-    await transporter.sendMail(adminMailOptions);
+      `,
+    });
 
     res.status(200).json({ message: 'Booking submitted successfully', booking });
   } catch (error) {
@@ -333,8 +328,7 @@ app.patch('/api/bookings/:id/accept', async (req, res) => {
       const serviceTypeLabel = booking.serviceType === 'pickup' ? 'Pickup & Drop' : 'Workshop Visit';
       const addressDisplay = [booking.address, booking.city, booking.pincode].filter(Boolean).join(', ');
 
-      await transporter.sendMail({
-        from: process.env.EMAIL_USER,
+      await sendEmail({
         to: booking.email,
         subject: 'Booking Accepted - Car Service',
         html: `
@@ -352,7 +346,7 @@ app.patch('/api/bookings/:id/accept', async (req, res) => {
           </ul>
           ${addressDisplay ? `<p><strong>Address:</strong> ${addressDisplay}</p>` : ''}
           <p>Thank you,<br>Car Service Team</p>
-        `
+        `,
       });
     }
 
@@ -383,8 +377,7 @@ app.patch('/api/bookings/:id/cancel', async (req, res) => {
       const serviceTypeLabel = booking.serviceType === 'pickup' ? 'Pickup & Drop' : 'Workshop Visit';
       const addressDisplay = [booking.address, booking.city, booking.pincode].filter(Boolean).join(', ');
 
-      await transporter.sendMail({
-        from: process.env.EMAIL_USER,
+      await sendEmail({
         to: booking.email,
         subject: 'Booking Cancellation - Car Service',
         html: `
@@ -402,7 +395,7 @@ app.patch('/api/bookings/:id/cancel', async (req, res) => {
           </ul>
           ${addressDisplay ? `<p><strong>Address:</strong> ${addressDisplay}</p>` : ''}
           <p>Thank you,<br>Car Service Team</p>
-        `
+        `,
       });
     }
 
@@ -449,11 +442,11 @@ app.post('/api/contact', async (req, res) => {
     messages.push(message);
 
     // Prepare email content for customer
-    const customerMailOptions = {
-      from: process.env.EMAIL_USER,
-      to: contactData.email,
-      subject: `Thank You for Your Message - ${contactData.subject}`,
-      html: `
+    if (contactData.email) {
+      await sendEmail({
+        to: contactData.email,
+        subject: `Thank You for Your Message - ${contactData.subject}`,
+        html: `
         <h2>Contact Confirmation</h2>
         <p>Dear ${contactData.name},</p>
         <p>Thank you for reaching out to Maa Mangala. We have received your message and will get back to you within 24 hours.</p>
@@ -468,12 +461,11 @@ app.post('/api/contact', async (req, res) => {
         <p>If you have any urgent queries, please call our 24/7 support line at +91 98765 43210.</p>
         <p>Thank you,<br>Maa Mangala Team</p>
       `,
-    };
+      });
+    }
 
-    // Prepare email content for admin
-    const adminMailOptions = {
-      from: process.env.EMAIL_USER,
-      to: 'chandanpradhan820@gmail.com', // Replace with service center's email
+    await sendEmail({
+      to: CONTACT_NOTIFICATION_EMAIL,
       subject: `New Contact Message - ${contactData.subject}`,
       html: `
         <h2>New Contact Message Received</h2>
@@ -488,11 +480,7 @@ app.post('/api/contact', async (req, res) => {
         </ul>
         <p>Please respond to the customer within 24 hours.</p>
       `,
-    };
-
-    // Send emails
-    await transporter.sendMail(customerMailOptions);
-    await transporter.sendMail(adminMailOptions);
+    });
 
     res.status(200).json({ message: 'Contact message submitted successfully', data: message });
   } catch (error) {
